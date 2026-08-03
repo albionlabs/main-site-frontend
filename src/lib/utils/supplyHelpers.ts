@@ -5,6 +5,11 @@
  */
 
 import { get } from "svelte/store";
+import { MIN_PURCHASABLE_WEI } from "$lib/utils/supplyThresholds";
+export {
+  MIN_PURCHASABLE_TOKENS,
+  isEffectivelySoldOut,
+} from "$lib/utils/supplyThresholds";
 import { sfts } from "$lib/stores";
 import { sftRepository } from "$lib/data/repositories";
 import { catalogService } from "$lib/services/CatalogService";
@@ -98,10 +103,11 @@ export function hasAvailableSupplySync(token: TokenMetadata): boolean {
   const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress);
 
   if (maxSupply) {
-    // Use accurate calculation when maxSupply is available
+    // Use accurate calculation when maxSupply is available. Ignore rounding
+    // dust — see MIN_PURCHASABLE_TOKENS.
     const totalShares = BigInt(sft.totalShares);
     const maxSupplyBig = BigInt(maxSupply);
-    return totalShares < maxSupplyBig;
+    return maxSupplyBig - totalShares >= MIN_PURCHASABLE_WEI;
   } else {
     // Fallback heuristic: assume tokens are available unless minted supply is very high
     const totalShares = BigInt(sft.totalShares);

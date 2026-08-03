@@ -10,8 +10,9 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
-	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
-	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
+	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR, calculateFullyDilutedReturns } from '$lib/utils/returnsEstimatorHelpers';
+	import { formatSupplyDisplay, isEffectivelySoldOut } from '$lib/utils/supplyHelpers';
+	import { sumRemainingProduction } from '$lib/utils/productionHelpers';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let asset: Asset;
@@ -67,6 +68,9 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	
 	// Use asset data directly from the data store
 	$: latestReport = asset.monthlyReports[asset.monthlyReports.length - 1] || null;
+	// Only production still ahead of us — the projections array covers the
+	// asset's whole life, roughly half of which is already produced and paid.
+	$: remainingBoe = sumRemainingProduction(asset.plannedProduction?.projections);
 
 	// Use tokens array directly
 	$: tokensArray = token;
@@ -143,7 +147,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 		<!-- Key Stats -->
 		<div class={highlightedStatsClasses}>
 			<div class={highlightStatClasses}>
-				<span class={highlightValueClasses}>{asset.plannedProduction?.projections.reduce((acc, curr) => acc + curr.production, 0) ? formatSmartNumber(asset.plannedProduction.projections.reduce((acc, curr) => acc + curr.production, 0), { suffix: ' boe' }) : 'TBD'}</span>
+				<span class={highlightValueClasses}>{remainingBoe ? formatSmartNumber(remainingBoe, { suffix: ' boe' }) : 'TBD'}</span>
 				<span class={highlightLabelClasses}>Exp. Remaining</span>
 			</div>
 			<div class={highlightStatClasses}>
@@ -197,19 +201,26 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 				{@const remainingCashflows = calculateMonthlyTokenCashflows(tokenItem, 65, mintedSupply, 1).map(m => m.cashflow)}
 				{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}
 				{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
-				{@const fullyDilutedReturns = calculateLifetimeIRR(tokenItem, 65, maxSupply, 1)}
+				{@const availableSupply = maxSupply - mintedSupply}
+				{@const soldOut = isEffectivelySoldOut(availableSupply)}
+				<!-- Lifetime is informational only: it includes months already paid out to
+				     earlier holders, so it is not what a buyer today would earn. -->
+				{@const lifetimeReturns = calculateLifetimeIRR(tokenItem, 65, mintedSupply, 1)}
+				{@const fullyDilutedReturns = soldOut ? 0 : calculateFullyDilutedReturns(tokenItem, 65, mintedSupply, availableSupply)}
 					<div class={tokenButtonClasses}>
 						<!-- Desktop: Full token info -->
 						<div class="hidden sm:flex w-full justify-between items-start gap-4">
 							<div class={tokenButtonLeftClasses}>
 								<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
 								<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
-								<button
-									class="mt-2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200 w-1/2"
-									on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
-								>
-									Buy
-								</button>
+								{#if !soldOut}
+									<button
+										class="mt-2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200 w-1/2"
+										on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
+									>
+										Buy
+									</button>
+								{/if}
 							</div>
 							<div class="flex flex-col items-start gap-2 border-l border-gray-300 pl-2">
 								<div class="text-sm font-bold text-black text-left mb-1">Returns</div>
@@ -220,10 +231,22 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 											<FormattedReturn value={currentReturns} />
 										</span>
 									</div>
-									<div class="flex items-center gap-1.5">
-										<span class="text-xs text-gray-500 font-medium">Fully Diluted:</span>
-										<span class="text-base text-primary font-extrabold">
-											<FormattedReturn value={fullyDilutedReturns} />
+									{#if soldOut}
+										<div class="flex items-center gap-1.5">
+											<span class="text-xs font-bold text-black uppercase tracking-wider">Sold Out</span>
+										</div>
+									{:else}
+										<div class="flex items-center gap-1.5">
+											<span class="text-xs text-gray-500 font-medium">Fully Diluted:</span>
+											<span class="text-base text-primary font-extrabold">
+												<FormattedReturn value={fullyDilutedReturns} />
+											</span>
+										</div>
+									{/if}
+									<div class="flex items-center gap-1.5" title="Return since launch, including payouts already made to earlier holders. Informational only — not a forward-looking return.">
+										<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
+										<span class="text-base text-gray-500 font-extrabold">
+											<FormattedReturn value={lifetimeReturns} />
 										</span>
 									</div>
 								</div>
@@ -252,10 +275,22 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												<FormattedReturn value={currentReturns} />
 											</span>
 										</div>
+										{#if soldOut}
+											<div class="flex items-center gap-1">
+												<span class="font-bold text-black uppercase tracking-wider">Sold Out</span>
+											</div>
+										{:else}
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Diluted:</span>
+												<span class="text-primary font-extrabold">
+													<FormattedReturn value={fullyDilutedReturns} />
+												</span>
+											</div>
+										{/if}
 										<div class="flex items-center gap-1">
-											<span class="text-gray-500">Diluted:</span>
-											<span class="text-primary font-extrabold">
-												<FormattedReturn value={fullyDilutedReturns} />
+											<span class="text-gray-500">Lifetime:</span>
+											<span class="text-gray-500 font-extrabold">
+												<FormattedReturn value={lifetimeReturns} />
 											</span>
 										</div>
 									</div>
