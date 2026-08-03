@@ -36,7 +36,7 @@ import {
 } from 'chart.js';
 import { onDestroy } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
-import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
+import { hasAvailableSupplySync, isEffectivelySoldOut } from '$lib/utils/supplyHelpers';
 
 // Only bar charts are rendered on this page (revenue history), so register
 // just the pieces that chart needs instead of the full chart.js registerables
@@ -1458,7 +1458,8 @@ async function handlePurchaseSuccess() {
 										{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
 										{@const monthlyIRR = calculateIRR(cashflows)}
 										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
-										{@const fullyDilutedRemainingIRR = calculateFullyDilutedReturns(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
+										{@const soldOut = isEffectivelySoldOut(supply?.availableSupply)}
+										{@const fullyDilutedRemainingIRR = soldOut ? 0 : calculateFullyDilutedReturns(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
 
 										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
 											Returns @${defaultOilPrice} {crudeBenchmark} Oil Price
@@ -1469,8 +1470,13 @@ async function handlePurchaseSuccess() {
 												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(remainingIRR)}</span>
 											</div>
 											<div class="text-center p-3 bg-white">
-												<span class="text-xs font-medium text-black opacity-70 block mb-1">Fully Diluted</span>
-												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(fullyDilutedRemainingIRR)}</span>
+												{#if soldOut}
+													<span class="text-xs font-medium text-black opacity-70 block mb-1">Availability</span>
+													<span class="text-xl font-extrabold text-black">Sold Out</span>
+												{:else}
+													<span class="text-xs font-medium text-black opacity-70 block mb-1">Fully Diluted</span>
+													<span class="text-xl font-extrabold text-primary">{formatSmartReturn(fullyDilutedRemainingIRR)}</span>
+												{/if}
 											</div>
 											<div class="text-center p-3 bg-white border-l border-light-gray relative overflow-visible" style="border-left-width: 1.5px;">
 												<div class="flex items-center justify-center gap-1 mb-1">
@@ -1488,7 +1494,7 @@ async function handlePurchaseSuccess() {
 													</span>
 													{#if showTooltip === 'lifetime-tooltip-' + token.contractAddress}
 														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded-none text-xs whitespace-nowrap z-[1000] mb-[5px]">
-															Return from holding token since launch, assuming current supply
+															Return since launch, including payouts already made to earlier holders. Informational only, not a forward-looking return.
 														</div>
 													{/if}
 												</div>

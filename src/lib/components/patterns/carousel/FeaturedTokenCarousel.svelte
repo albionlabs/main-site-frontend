@@ -6,6 +6,7 @@
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { chainId } from 'svelte-wagmi';
 	import { formatSmartNumber } from '$lib/utils/formatters';
+	import { sumRemainingProduction } from '$lib/utils/productionHelpers';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
@@ -466,7 +467,7 @@
 					<div class={assetStatsClasses}>
 						<div class={statItemClasses}>
 							<div class={statLabelClasses}>Remaining Production</div>
-							<div class={statValueClasses}>{item.asset.plannedProduction?.projections.reduce((acc, curr) => acc + curr.production, 0) ? formatSmartNumber(item.asset.plannedProduction.projections.reduce((acc, curr) => acc + curr.production, 0), { suffix: ' boe' }) : 'TBD'}</div>
+							<div class={statValueClasses}>{sumRemainingProduction(item.asset.plannedProduction?.projections) ? formatSmartNumber(sumRemainingProduction(item.asset.plannedProduction?.projections), { suffix: ' boe' }) : 'TBD'}</div>
 						</div>
 					</div>
 
@@ -483,7 +484,7 @@
 					<h3 class={assetNameClasses}>{item.asset.name}</h3>
 					<div class="text-sm text-black opacity-70">
 						<span class="font-medium">Remaining Production:</span> 
-						<span>{item.asset.plannedProduction?.projections.reduce((acc, curr) => acc + curr.production, 0) ? formatSmartNumber(item.asset.plannedProduction.projections.reduce((acc, curr) => acc + curr.production, 0), { suffix: ' boe' }) : 'TBD'}</span>
+						<span>{sumRemainingProduction(item.asset.plannedProduction?.projections) ? formatSmartNumber(sumRemainingProduction(item.asset.plannedProduction?.projections), { suffix: ' boe' }) : 'TBD'}</span>
 					</div>
 				</div>
 							</div>

@@ -210,10 +210,13 @@ export let onLocationClick: (() => void) | undefined = undefined;
 				})()}
 				size="small"
 			/>
+			<!-- This is the count of token releases, not how many are still on
+			     sale — labelling it "Available" contradicted the "Currently Sold
+			     Out" banners on the releases themselves. -->
 			<StatsCard
-				title="Available Tokens"
+				title="Token Releases"
 				value={tokenCount.toString()}
-				subtitle="Token releases"
+				subtitle="Total issued"
 				size="small"
 				on:click={onTokenSectionClick || (() => {})}
 			/>

@@ -2,6 +2,7 @@
 	import { fade } from 'svelte/transition';
 	import { onDestroy } from 'svelte';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import { isEffectivelySoldOut } from '$lib/utils/supplyThresholds';
 	import {
 		calculateMonthlyTokenCashflows,
 		calculateNPV,
@@ -56,21 +57,24 @@
 	let discountRate = 10;
 	let numberOfTokens = 1;
 
+	// Rounding dust counts as sold out: ALB-WR1-R2 has 2,000 wei left against a
+	// 36,000 cap, which `availableSupply > 0` treated as purchasable.
+	$: soldOut = isEffectivelySoldOut(availableSupply);
+
 	// Reset assumptions and calculate when modal opens
 	$: if (isOpen && token) {
 		oilPrice = 65;
 		discountRate = 10;
-		// Default to 1 token, unless available supply is between 0 and 1 (fractional)
-		// When sold out (availableSupply <= 0), use 1 for illustrative purposes
-		numberOfTokens = availableSupply > 0 && availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
+		// Default to 1 token, unless available supply is a genuine fraction
+		numberOfTokens = !soldOut && availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
 		// Explicitly trigger calculation after reset
 		updateCalculations();
 	}
 
 	// Validation error for numberOfTokens
 	// Use a small epsilon to handle floating point precision issues
-	// Don't show error when sold out (availableSupply <= 0) since calculator is for illustration only
-	$: tokensError = availableSupply > 0 && (numberOfTokens - availableSupply) > 0.0001 ? `Only ${availableSupply.toFixed(3)} tokens available` : '';
+	// No error when sold out — the calculator is illustrative only
+	$: tokensError = !soldOut && (numberOfTokens - availableSupply) > 0.0001 ? `Only ${availableSupply.toFixed(3)} tokens available` : '';
 
 	// Token Mode Calculated values - Remaining (from current month)
 	let monthlyTokenCashflows: Array<{ month: string; cashflow: number }> = [];
@@ -119,33 +123,36 @@
 	};
 
 	// Reactive metrics arrays - these re-run when values change, maintaining Svelte reactivity
+	// When the token is sold out there is nothing to mint today, so a
+	// forward-looking return is undefined rather than negative. Showing the raw
+	// numbers (a -44.76% IRR on ~zero available supply) reads as a real loss.
 	$: remainingMetrics = [
 		{
 			key: 'irr',
 			label: 'Annualized IRR',
 			value: remainingIRR,
-			formatted: `${isFinite(remainingIRR) ? remainingIRR.toFixed(2) : '—'}%`,
+			formatted: soldOut ? 'N/A' : `${isFinite(remainingIRR) ? remainingIRR.toFixed(2) : '—'}%`,
 			tooltip: tooltips.irr
 		},
 		{
 			key: 'npv',
 			label: `NPV @ ${discountRate}%`,
 			value: remainingNPV,
-			formatted: `${isFinite(remainingNPV) ? `$${remainingNPV.toFixed(2)}` : '—'}`,
+			formatted: soldOut ? 'N/A' : `${isFinite(remainingNPV) ? `$${remainingNPV.toFixed(2)}` : '—'}`,
 			tooltip: tooltips.npv
 		},
 		{
 			key: 'payback',
 			label: 'Payback Period',
 			value: remainingPayback,
-			formatted: `${isFinite(remainingPayback) ? remainingPayback.toFixed(1) : '—'} mo`,
+			formatted: soldOut ? 'N/A' : `${isFinite(remainingPayback) ? remainingPayback.toFixed(1) : '—'} mo`,
 			tooltip: tooltips.payback
 		},
 		{
 			key: 'apr',
 			label: 'APR',
 			value: remainingAPR,
-			formatted: `${isFinite(remainingAPR) ? remainingAPR.toFixed(2) : '—'}%`,
+			formatted: soldOut ? 'N/A' : `${isFinite(remainingAPR) ? remainingAPR.toFixed(2) : '—'}%`,
 			tooltip: tooltips.apr
 		}
 	];
@@ -481,10 +488,10 @@
 					</div>
 
 					<!-- Sold Out Notice -->
-					{#if availableSupply <= 0}
+					{#if soldOut}
 						<div class="flex justify-center">
 							<div class="bg-gray-100 border border-gray-300 rounded-none px-4 py-2 inline-flex items-center gap-2 text-sm">
-								<span class="text-gray-600 font-medium">Sold out. Numbers shown for illustrative purposes.</span>
+								<span class="text-gray-600 font-medium">This token is sold out — there are none left to mint, so returns from today are not applicable. Figures below are illustrative only.</span>
 							</div>
 						</div>
 					{/if}
@@ -508,13 +515,15 @@
 					<div class={sectionClasses}>
 						<div class="flex items-center justify-between mb-4">
 							<h3 class={sectionTitleClasses}>Return Metrics</h3>
-							<button
-								type="button"
-								on:click={setFullyDilutedReturns}
-								class="px-3 py-1.5 bg-secondary text-white text-xs font-medium rounded-none hover:bg-opacity-90 transition-colors"
-							>
-								View Fully Diluted Returns
-							</button>
+							{#if !soldOut}
+								<button
+									type="button"
+									on:click={setFullyDilutedReturns}
+									class="px-3 py-1.5 bg-secondary text-white text-xs font-medium rounded-none hover:bg-opacity-90 transition-colors"
+								>
+									View Fully Diluted Returns
+								</button>
+							{/if}
 						</div>
 
 						{#each [{title: 'Remaining (From Today)', metrics: remainingMetrics, suffix: 'remaining'}, {title: 'Lifetime (From Start)', metrics: lifetimeMetrics, suffix: 'lifetime'}] as section (section.suffix)}

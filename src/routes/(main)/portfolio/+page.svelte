@@ -35,6 +35,7 @@ import type { Hex } from 'viem';
 import { getTokenBalancesOnchain } from '$lib/data/clients/onchain';
 import { ENERGY_FIELDS } from '$lib/network';
 import { getClaimsBundle } from '$lib/utils/claimsBundle';
+import { resolvePayoutPerToken } from '$lib/utils/payoutHelpers';
 import { onMount } from 'svelte';
 
 onMount(() => {
@@ -123,6 +124,7 @@ interface PortfolioHolding {
 	asset?: PinnedMetadata['asset']; // Token's embedded asset data (for returns estimation)
 	sharedAsset?: import('$lib/types/uiTypes').Asset; // Shared Asset object (for display)
 	sftAddress: string;
+	mintedSupply: string; // SFT totalShares (wei) — divisor for per-token payouts
 	claimHistory: ClaimsHistoryItem[];
 	pinnedMetadata: PinnedMetadata;
 	expectedNextPayout: Date | null;
@@ -991,6 +993,7 @@ function percentageDisplay(value: number): string {
 							asset,
 							sharedAsset,
 							sftAddress: sft.id,
+							mintedSupply: sft.totalShares ?? '0',
 							claimHistory: sftClaims,
 							pinnedMetadata: pinnedMetadata,
 							expectedNextPayout
@@ -1015,7 +1018,10 @@ function percentageDisplay(value: number): string {
 			for (const claim of claimHistory) {
 				if (claim.date && claim.amount) {
 					const date = new Date(claim.date);
-					const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+					// Claim dates are normalised to UTC midnight (`${month}-01T00:00:00.000Z`)
+					// above, so read them in UTC — local getters bucket every payout into
+					// the previous month for anyone west of UTC.
+					const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 					const amount = Number(claim.amount);
 					monthlyPayoutTotals[monthKey] = (monthlyPayoutTotals[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
 				}
@@ -1097,18 +1103,81 @@ function percentageDisplay(value: number): string {
 		void loadSftData();
 	}
 	
+	// Payouts land ~2 months after the accrual month (June accrual paid early
+	// August). Shared by the history chart and the cash flow chart so the two
+	// cover the same months.
+	const PAYOUT_RECEIPT_LAG_MONTHS = 2;
+
+	function addMonths(monthStr: string, offset: number): string {
+		const [year, month] = monthStr.split('-').map(Number);
+		const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+		return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+	}
+
 	function getPayoutChartData(holding: PortfolioHolding): HistoryPoint[] {
-		if (!holding.claimHistory || holding.claimHistory.length === 0) {
+		// Sourced from metadata payoutData, NOT claimHistory. claimHistory holds
+		// only what this wallet has actually claimed, so any month that was paid
+		// but not yet claimed would render as $0 — asserting "no payout" when
+		// there was one. payoutData covers every month, claimed or not.
+		const payoutData = holding.pinnedMetadata?.payoutData;
+		if (!Array.isArray(payoutData) || payoutData.length === 0) {
 			return [];
 		}
-		
-		return holding.claimHistory
-			.filter((claim) => claim.date && claim.amount)
-			.map((claim) => ({
-				date: new Date(claim.date).toISOString().split('T')[0],
-				value: Number(claim.amount)
-			}))
-			.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+		const claimAmountByOrderHash: Record<string, number> = {};
+		for (const claim of holding.claimHistory ?? []) {
+			if (!claim.orderHash) continue;
+			const claimAmount = Number(claim.amount);
+			if (!Number.isFinite(claimAmount)) continue;
+			claimAmountByOrderHash[claim.orderHash.toLowerCase()] = claimAmount;
+		}
+
+		// Aggregate by month: the metadata legitimately carries more than one
+		// payout entry for a month (e.g. a catch-up tranche alongside the regular
+		// royalty), which previously produced duplicate axis labels like "Jun, Jun".
+		const totalsByMonth: Record<string, number> = {};
+		for (const payout of payoutData) {
+			const month = payout.month;
+			if (!month) continue;
+
+			const orderHash = payout.tokenPayout?.orderHash?.toLowerCase();
+			const actualAmount = orderHash ? claimAmountByOrderHash[orderHash] : undefined;
+			const payoutPerToken = resolvePayoutPerToken(
+				payout.tokenPayout?.payoutPerToken,
+				payout.tokenPayout?.totalPayout ?? 0,
+				holding.mintedSupply
+			);
+			// Prefer the real claimed amount; fall back to the per-token estimate.
+			const value = actualAmount !== undefined
+				? actualAmount
+				: payoutPerToken * holding.tokensOwned;
+			if (!Number.isFinite(value) || value <= 0) continue;
+
+			const receivedMonth = addMonths(month, PAYOUT_RECEIPT_LAG_MONTHS);
+			totalsByMonth[receivedMonth] = (totalsByMonth[receivedMonth] ?? 0) + value;
+		}
+
+		const months = Object.keys(totalsByMonth).sort();
+		if (months.length === 0) {
+			return [];
+		}
+
+		// Emit a point for every month in the range. The chart's x-axis is
+		// categorical (one slot per point), so skipping months silently
+		// compresses time — Nov would sit next to Apr looking consecutive.
+		const points: HistoryPoint[] = [];
+		const [firstYear, firstMonth] = months[0].split('-').map(Number);
+		const [lastYear, lastMonth] = months[months.length - 1].split('-').map(Number);
+		const cursor = new Date(Date.UTC(firstYear, firstMonth - 1, 1));
+		const end = new Date(Date.UTC(lastYear, lastMonth - 1, 1));
+
+		while (cursor.getTime() <= end.getTime()) {
+			const monthKey = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
+			points.push({ date: `${monthKey}-01`, value: totalsByMonth[monthKey] ?? 0 });
+			cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+		}
+
+		return points;
 	}
 
 	async function connectWallet() {
@@ -1607,11 +1676,6 @@ function percentageDisplay(value: number): string {
 
 					// Process payouts from metadata payoutData (source of truth for when payouts were distributed)
 					// Apply 2-month offset: e.g., August payout is received in October
-					const addMonths = (monthStr: string, offset: number): string => {
-						const [year, month] = monthStr.split('-').map(Number);
-						const date = new Date(year, month - 1 + offset, 1);
-						return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-					};
 
 					for (const holding of holdings) {
 						const payoutData = holding.pinnedMetadata?.payoutData;
@@ -1638,9 +1702,20 @@ function percentageDisplay(value: number): string {
 
 							for (const payout of payoutData) {
 								const month = payout.month;
-								const payoutPerToken = payout.tokenPayout?.payoutPerToken ?? 0;
-								if (month && payoutPerToken > 0) {
-									const receivedMonth = addMonths(month, 2); // 2-month offset
+								// `payoutPerToken` is a removed schema field (0 on everything pinned
+								// from 2026-02 on), so derive it from totalPayout and fixed supply.
+								const payoutPerToken = resolvePayoutPerToken(
+									payout.tokenPayout?.payoutPerToken,
+									payout.tokenPayout?.totalPayout ?? 0,
+									holding.mintedSupply
+								);
+								// A month with a genuine on-chain claim must never be dropped just
+								// because the per-token estimate is unavailable.
+								const payoutOrderHash = payout.tokenPayout?.orderHash?.toLowerCase();
+								const hasRealClaim =
+									!!payoutOrderHash && claimAmountByOrderHash[payoutOrderHash] !== undefined;
+								if (month && (payoutPerToken > 0 || hasRealClaim)) {
+									const receivedMonth = addMonths(month, PAYOUT_RECEIPT_LAG_MONTHS);
 									const orderHash = payout.tokenPayout?.orderHash?.toLowerCase();
 									const actualAmount = orderHash ? claimAmountByOrderHash[orderHash] : undefined;
 									const userPayout = actualAmount !== undefined
