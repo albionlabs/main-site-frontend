@@ -46,6 +46,10 @@
 	let confirmingTarget: 'all' | string | null = null;
 	let verifyingTarget: 'all' | string | null = null;
 	let claimSuccess = false;
+	// Hashes that are on chain but whose receipt we could not read back. The claim
+	// itself succeeded; only our confirmation of it failed. Kept separate from
+	// claimSuccess so the banner can say "submitted" rather than overclaiming.
+	let unconfirmedTxHashes: string[] = [];
 	let dataLoadError = false;
 
 	let holdings: ClaimsHoldingsGroup[] = [];
@@ -310,7 +314,18 @@
 		if (isRpcRateLimitError(error)) {
 			return 'Base RPC rate limit reached. Wait a moment and try again, or retry one claim at a time.';
 		}
-		return error instanceof Error ? error.message : 'Claim transaction failed';
+		// viem's HttpRequestError message is a multi-line dump carrying the RPC URL and
+		// the raw JSON-RPC request body. Surfacing that verbatim is how a user ended up
+		// reading "Status: 403 ... eth_getTransactionReceipt ..." out of an alert box.
+		// Prefer viem's one-line shortMessage; keep the full object in the console.
+		const shortMessage = (error as { shortMessage?: string })?.shortMessage;
+		if (typeof shortMessage === 'string' && shortMessage.length > 0) {
+			return shortMessage;
+		}
+		if (error instanceof Error && error.message && !error.message.includes('\n')) {
+			return error.message;
+		}
+		return 'Claim transaction failed. Please try again — see the browser console for details.';
 	}
 
 	/** Reload claimable holdings from chain/subgraph immediately before submitting. */
@@ -395,7 +410,19 @@
 		}
 
 		confirmingTarget = confirmLabel;
-		await waitForTransactionReceipt($wagmiConfig, { hash, confirmations: 2 });
+		try {
+			await waitForTransactionReceipt($wagmiConfig, { hash, confirmations: 2 });
+		} catch (error) {
+			// The transaction is ALREADY BROADCAST — `hash` was returned by
+			// writeContract/sendV6Claim above, so the wallet has signed and submitted it.
+			// Failing to read the receipt back means we could not CONFIRM the claim, not
+			// that the claim failed. This used to propagate and get reported as
+			// "Claim transaction failed", telling users their claim had failed when it
+			// had in fact succeeded — see the publicnode eth_getTransactionReceipt 403.
+			// Treated like the subgraph-indexing wait below: note it and carry on.
+			console.warn('Could not confirm claim receipt; tx is already on chain:', hash, error);
+			unconfirmedTxHashes = [...unconfirmedTxHashes, hash];
+		}
 		try {
 			await waitForTransactionInSubgraph(hash, orderbookAddress);
 		} catch {
@@ -438,6 +465,7 @@
 	async function claimAllPayouts() {
 		claimingTarget = 'all';
 		verifyingTarget = 'all';
+		unconfirmedTxHashes = [];
 		try {
 			const freshHoldings = await refreshClaimableHoldings();
 			const hasClaimable = freshHoldings.some((g) => g.holdings.length > 0);
@@ -492,6 +520,7 @@
 	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
 		claimingTarget = group.tokenAddress;
 		verifyingTarget = group.tokenAddress;
+		unconfirmedTxHashes = [];
 		try {
 			const freshHoldings = await refreshClaimableHoldings();
 			const claimGroup = freshHoldings.find(
@@ -679,14 +708,38 @@
 			{/if}
 
 			{#if claimSuccess && claimingTarget === null && confirmingTarget === null}
-				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto relative">
-					<button
-						class="absolute top-2 right-2 text-green-600 hover:text-green-800 text-lg leading-none"
-						on:click={() => claimSuccess = false}
-						aria-label="Dismiss"
-					>×</button>
-					✅ Claim successful! Tokens have been sent to your wallet.
-				</div>
+				{#if unconfirmedTxHashes.length > 0}
+					<!-- Broadcast but unconfirmed: the transaction is on chain, we just could
+					     not read its receipt back. Say exactly that and link the explorer,
+					     rather than claiming success we have not verified. -->
+					<div class="text-center mt-4 p-4 bg-amber-100 text-amber-900 rounded-none max-w-md mx-auto relative">
+						<button
+							class="absolute top-2 right-2 text-amber-700 hover:text-amber-900 text-lg leading-none"
+							on:click={() => { claimSuccess = false; unconfirmedTxHashes = []; }}
+							aria-label="Dismiss"
+						>×</button>
+						Claim submitted. We couldn't confirm it on-chain just now, so it may still be
+						settling — your tokens should arrive shortly. Check the transaction:
+						<span class="block mt-2">
+							{#each unconfirmedTxHashes as txHash (txHash)}
+								<a
+									class="underline break-all"
+									href={`https://basescan.org/tx/${txHash}`}
+									target="_blank"
+									rel="noopener noreferrer">{txHash.slice(0, 10)}…{txHash.slice(-8)}</a>
+							{/each}
+						</span>
+					</div>
+				{:else}
+					<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto relative">
+						<button
+							class="absolute top-2 right-2 text-green-600 hover:text-green-800 text-lg leading-none"
+							on:click={() => claimSuccess = false}
+							aria-label="Dismiss"
+						>×</button>
+						✅ Claim successful! Tokens have been sent to your wallet.
+					</div>
+				{/if}
 			{/if}
 
 			<!-- Payout email alerts: signup lives where payout attention already is;
