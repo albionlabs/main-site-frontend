@@ -1103,24 +1103,58 @@ function percentageDisplay(value: number): string {
 		void loadSftData();
 	}
 	
+	// Payouts land ~2 months after the accrual month (June accrual paid early
+	// August). Shared by the history chart and the cash flow chart so the two
+	// cover the same months.
+	const PAYOUT_RECEIPT_LAG_MONTHS = 2;
+
+	function addMonths(monthStr: string, offset: number): string {
+		const [year, month] = monthStr.split('-').map(Number);
+		const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+		return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+	}
+
 	function getPayoutChartData(holding: PortfolioHolding): HistoryPoint[] {
-		if (!holding.claimHistory || holding.claimHistory.length === 0) {
+		// Sourced from metadata payoutData, NOT claimHistory. claimHistory holds
+		// only what this wallet has actually claimed, so any month that was paid
+		// but not yet claimed would render as $0 — asserting "no payout" when
+		// there was one. payoutData covers every month, claimed or not.
+		const payoutData = holding.pinnedMetadata?.payoutData;
+		if (!Array.isArray(payoutData) || payoutData.length === 0) {
 			return [];
 		}
 
-		// Aggregate by calendar month. Several claims can resolve to the same
-		// month (the metadata legitimately carries more than one payout entry
-		// for a month, e.g. a catch-up distribution), and charting them as
-		// separate points produced duplicate axis labels like "Jun, Jun".
+		const claimAmountByOrderHash: Record<string, number> = {};
+		for (const claim of holding.claimHistory ?? []) {
+			if (!claim.orderHash) continue;
+			const claimAmount = Number(claim.amount);
+			if (!Number.isFinite(claimAmount)) continue;
+			claimAmountByOrderHash[claim.orderHash.toLowerCase()] = claimAmount;
+		}
+
+		// Aggregate by month: the metadata legitimately carries more than one
+		// payout entry for a month (e.g. a catch-up tranche alongside the regular
+		// royalty), which previously produced duplicate axis labels like "Jun, Jun".
 		const totalsByMonth: Record<string, number> = {};
-		for (const claim of holding.claimHistory) {
-			if (!claim.date || !claim.amount) continue;
-			const date = new Date(claim.date);
-			if (Number.isNaN(date.getTime())) continue;
-			const amount = Number(claim.amount);
-			if (!Number.isFinite(amount)) continue;
-			const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-			totalsByMonth[monthKey] = (totalsByMonth[monthKey] ?? 0) + amount;
+		for (const payout of payoutData) {
+			const month = payout.month;
+			if (!month) continue;
+
+			const orderHash = payout.tokenPayout?.orderHash?.toLowerCase();
+			const actualAmount = orderHash ? claimAmountByOrderHash[orderHash] : undefined;
+			const payoutPerToken = resolvePayoutPerToken(
+				payout.tokenPayout?.payoutPerToken,
+				payout.tokenPayout?.totalPayout ?? 0,
+				holding.mintedSupply
+			);
+			// Prefer the real claimed amount; fall back to the per-token estimate.
+			const value = actualAmount !== undefined
+				? actualAmount
+				: payoutPerToken * holding.tokensOwned;
+			if (!Number.isFinite(value) || value <= 0) continue;
+
+			const receivedMonth = addMonths(month, PAYOUT_RECEIPT_LAG_MONTHS);
+			totalsByMonth[receivedMonth] = (totalsByMonth[receivedMonth] ?? 0) + value;
 		}
 
 		const months = Object.keys(totalsByMonth).sort();
@@ -1128,10 +1162,9 @@ function percentageDisplay(value: number): string {
 			return [];
 		}
 
-		// Emit a point for every month in the range, including months with no
-		// payout. The chart's x-axis is categorical (one slot per point), so
-		// skipping empty months silently compresses time — Nov would sit next
-		// to Apr looking like consecutive periods.
+		// Emit a point for every month in the range. The chart's x-axis is
+		// categorical (one slot per point), so skipping months silently
+		// compresses time — Nov would sit next to Apr looking consecutive.
 		const points: HistoryPoint[] = [];
 		const [firstYear, firstMonth] = months[0].split('-').map(Number);
 		const [lastYear, lastMonth] = months[months.length - 1].split('-').map(Number);
@@ -1643,11 +1676,6 @@ function percentageDisplay(value: number): string {
 
 					// Process payouts from metadata payoutData (source of truth for when payouts were distributed)
 					// Apply 2-month offset: e.g., August payout is received in October
-					const addMonths = (monthStr: string, offset: number): string => {
-						const [year, month] = monthStr.split('-').map(Number);
-						const date = new Date(year, month - 1 + offset, 1);
-						return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-					};
 
 					for (const holding of holdings) {
 						const payoutData = holding.pinnedMetadata?.payoutData;
@@ -1687,7 +1715,7 @@ function percentageDisplay(value: number): string {
 								const hasRealClaim =
 									!!payoutOrderHash && claimAmountByOrderHash[payoutOrderHash] !== undefined;
 								if (month && (payoutPerToken > 0 || hasRealClaim)) {
-									const receivedMonth = addMonths(month, 2); // 2-month offset
+									const receivedMonth = addMonths(month, PAYOUT_RECEIPT_LAG_MONTHS);
 									const orderHash = payout.tokenPayout?.orderHash?.toLowerCase();
 									const actualAmount = orderHash ? claimAmountByOrderHash[orderHash] : undefined;
 									const userPayout = actualAmount !== undefined
