@@ -6,6 +6,7 @@
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, Token, PlannedProduction } from "$lib/types/uiTypes";
 import { mergeProductionHistory } from "$lib/utils/productionMerge";
+import { resolvePayoutPerToken } from "$lib/utils/payoutHelpers";
 import {
   TokenType,
   ProductionStatus,
@@ -141,7 +142,8 @@ function toIsoDate(value: unknown): ISODateTimeString {
 }
 
 function normalizePayoutData(
-  entries?: PinnedMetadataPayoutEntry[],
+  entries: PinnedMetadataPayoutEntry[] | undefined,
+  mintedSupply: bigint | string | number | undefined,
 ): PayoutData[] {
   if (!Array.isArray(entries)) {
     return [];
@@ -150,11 +152,19 @@ function normalizePayoutData(
   for (const entry of entries) {
     const month = ensureYearMonth(entry?.month);
     const payout = entry?.tokenPayout ?? {};
+    const totalPayout = toNumber(payout.totalPayout);
     result.push({
       month,
       tokenPayout: {
-        totalPayout: toNumber(payout.totalPayout),
-        payoutPerToken: toNumber(payout.payoutPerToken),
+        totalPayout,
+        // `payoutPerToken` is a removed schema field — trust it where legacy
+        // entries still carry it, otherwise derive from totalPayout and the
+        // fixed supply. See resolvePayoutPerToken.
+        payoutPerToken: resolvePayoutPerToken(
+          toNumber(payout.payoutPerToken),
+          totalPayout,
+          mintedSupply,
+        ),
         txHash: toString(payout.txHash),
         orderHash: toString(payout.orderHash),
       },
@@ -164,9 +174,10 @@ function normalizePayoutData(
 }
 
 function toMergePayoutRecords(
-  entries?: PinnedMetadataPayoutEntry[],
+  entries: PinnedMetadataPayoutEntry[] | undefined,
+  mintedSupply: bigint | string | number | undefined,
 ): MergePayoutRecord[] {
-  return normalizePayoutData(entries).map((entry) => ({
+  return normalizePayoutData(entries, mintedSupply).map((entry) => ({
     month: entry.month,
     tokenPayout: { payoutPerToken: entry.tokenPayout.payoutPerToken },
   }));
@@ -497,7 +508,10 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       tokenType: ensureTokenType(pinnedMetadata.tokenType),
       firstPaymentDate: ensureYearMonth(pinnedMetadata.firstPaymentDate),
       sharePercentage: pinnedMetadata.sharePercentage,
-      payoutData: normalizePayoutData(pinnedMetadata.payoutData),
+      payoutData: normalizePayoutData(
+        pinnedMetadata.payoutData,
+        sft.totalShares,
+      ),
       asset: buildTokenAssetData(assetMetadata),
       metadata: ensureMetadata(pinnedMetadata.metadata, baseMetadata),
     };
@@ -533,6 +547,7 @@ export class AssetTransformer extends BaseSftTransformer {
     const monthlyReports = this.transformMonthlyReports(
       assetData,
       pinnedMetadata,
+      sft.totalShares,
     );
 
     const assetStatus = ensureAssetStatus(assetData.production?.status);
@@ -687,6 +702,7 @@ export class AssetTransformer extends BaseSftTransformer {
   private transformMonthlyReports(
     assetData: PinnedMetadataAsset,
     pinnedMetadata: PinnedMetadata,
+    mintedSupply: bigint | string | number | undefined,
   ) {
     const historical: MergeHistoricalRecord[] = Array.isArray(
       assetData.historicalProduction,
@@ -719,7 +735,10 @@ export class AssetTransformer extends BaseSftTransformer {
         }))
       : [];
 
-    const payoutRecords = toMergePayoutRecords(pinnedMetadata?.payoutData);
+    const payoutRecords = toMergePayoutRecords(
+      pinnedMetadata?.payoutData,
+      mintedSupply,
+    );
 
     return mergeProductionHistory(historical, receipts, payoutRecords);
   }
