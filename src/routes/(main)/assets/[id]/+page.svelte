@@ -308,8 +308,17 @@ let loadedAssetId: string | null = null;
 		return value;
 	}
 
+	// When nothing is available, collapsing the sold-out releases leaves the section
+	// empty and hides the lifetime return — the record of what the release actually
+	// paid, which is exactly what a visitor wants once they can no longer buy. So
+	// reveal them automatically when there is nothing else to show. Derived rather
+	// than assigned into showSoldOutTokens, so it cannot fight the toggle or flip
+	// mid-load while token data is still arriving.
+	$: autoRevealSoldOut = availableTokens.length === 0 && soldOutCount > 0;
 	// Tokens to display: available tokens, plus sold out if toggle is on
-	$: visibleTokens = showSoldOutTokens ? [...availableTokens, ...soldOutTokens] : availableTokens;
+	$: visibleTokens = (showSoldOutTokens || autoRevealSoldOut)
+		? [...availableTokens, ...soldOutTokens]
+		: availableTokens;
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
 // Use asset-level monthlyReports as primary source (selected from token with most recent receiptsData)
 // Fall back to primaryToken's receiptsData for backwards compatibility
@@ -1467,7 +1476,16 @@ async function handlePurchaseSuccess() {
 										<div class="grid grid-cols-3 gap-2 sm:gap-3 mb-3 overflow-visible">
 											<div class="text-center p-3 bg-white">
 												<span class="text-xs font-medium text-black opacity-70 block mb-1">Current</span>
-												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(remainingIRR)}</span>
+												{#if soldOut}
+													<!-- Forward return on a purchase that cannot be made. R1 has already
+													     paid 77¢ of its 160¢ lifetime, so buying at $1 today prices as
+													     deeply negative and rendered as "<0%" next to "Sold Out" — which
+													     reads as a broken figure rather than an inapplicable one. N/A
+													     matches the returns estimator's sold-out treatment. -->
+													<span class="text-xl font-extrabold text-black opacity-40">N/A</span>
+												{:else}
+													<span class="text-xl font-extrabold text-primary">{formatSmartReturn(remainingIRR)}</span>
+												{/if}
 											</div>
 											<div class="text-center p-3 bg-white">
 												{#if soldOut}
@@ -1762,8 +1780,9 @@ async function handlePurchaseSuccess() {
 					{/if}
 				</div>
 
-				<!-- Sold Out Tokens Toggle -->
-				{#if soldOutCount > 0}
+				<!-- Sold Out Tokens Toggle. Suppressed when the sold-out releases are the
+				     only ones there are: "Hide" would empty the section entirely. -->
+				{#if soldOutCount > 0 && !autoRevealSoldOut}
 					<div class="mt-8 flex justify-center">
 						<button
 							class="px-6 py-3 bg-white border border-light-gray text-black font-semibold text-sm uppercase tracking-wider cursor-pointer transition-all duration-200 hover:bg-light-gray hover:border-black"
