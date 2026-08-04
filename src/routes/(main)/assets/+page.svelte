@@ -71,7 +71,14 @@
 		loadTokenAndAssets();
 	}
 
-	$: visibleTokensWithAssets = showSoldOutAssets
+	$: availableCount = featuredTokensWithAssets.filter((item) => hasAvailableSupplySync(item.token)).length;
+	// With every release sold out, filtering to "available" empties the page and puts
+	// the lifetime returns behind a click. Show the sold-out assets instead of an empty
+	// state — their track record is the useful thing left to show. Derived, so it never
+	// fights the toggle or flips while data is still loading.
+	$: autoRevealSoldOut = availableCount === 0 && soldOutCount > 0;
+
+	$: visibleTokensWithAssets = (showSoldOutAssets || autoRevealSoldOut)
 		? featuredTokensWithAssets
 		: featuredTokensWithAssets.filter((item) => hasAvailableSupplySync(item.token));
 
@@ -152,8 +159,9 @@
 		{/if}
 	</HeroSection>
 
-	<!-- View Sold Out Assets Toggle -->
-	{#if !loading && featuredTokensWithAssets.length > 0}
+	<!-- View Sold Out Assets Toggle. Hidden when sold-out assets are all there is:
+	     with nothing available, "Hide" would leave an empty page. -->
+	{#if !loading && featuredTokensWithAssets.length > 0 && !autoRevealSoldOut}
 		{#if soldOutCount > 0 && !showSoldOutAssets}
 			<div class="text-center mt-8 sm:mt-12">
 				<SecondaryButton on:click={() => showSoldOutAssets 	= true}>

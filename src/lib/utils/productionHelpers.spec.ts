@@ -76,8 +76,14 @@ describe("sumRemainingProduction", () => {
 // since it is the other half of the "dust" fix.
 describe("isEffectivelySoldOut (real on-chain supply)", () => {
   it("treats ALB-WR1-R2's 2,000 wei of leftover supply as sold out", () => {
-    // maxSupply 36,000 - minted 35,999.999999999999998
-    expect(isEffectivelySoldOut(36000 - 35999.999999999999998)).toBe(true);
+    // maxSupply 36,000e18 wei - minted 35,999,999,999,999,999,998,000 wei = 2,000 wei.
+    // Expressed as a token count directly rather than as `36000 - 35999.999999999999998`:
+    // that second literal is not representable as a double and silently rounds to exactly
+    // 36000, so the old assertion evaluated isEffectivelySoldOut(0) and merely duplicated
+    // the fully-minted case below instead of exercising the dust value at all.
+    const dustTokens = 2000 / 1e18;
+    expect(dustTokens).toBeGreaterThan(0); // guard: the value under test is genuinely non-zero
+    expect(isEffectivelySoldOut(dustTokens)).toBe(true);
   });
 
   it("treats a fully minted token as sold out", () => {

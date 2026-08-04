@@ -171,10 +171,14 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 			</PrimaryButton>
 		</div>
 
-		<!-- Available Tokens Section - Mobile Responsive -->
-		{#if hasAvailableTokens}
+		<!-- Token Releases Section - Mobile Responsive -->
+		<!-- Rendered whenever the asset has any releases, NOT only when something is still
+		     buyable. Gating this on hasAvailableTokens meant a fully sold-out asset showed
+		     no token rows at all, which hid the lifetime return — the one figure that is
+		     most worth showing once a release is gone. -->
+		{#if tokensArray.length > 0}
 		<div class={tokensSectionClasses}>
-			<h4 class={tokensTitleClasses}>Available Tokens</h4>
+			<h4 class={tokensTitleClasses}>{hasAvailableTokens ? 'Available Tokens' : 'Token Releases'}</h4>
 			<div class="flex flex-col">
 				{#if tokensArray.length > 2 && canScrollUp}
 					<!-- Top scroll indicator - hidden on mobile -->
@@ -225,30 +229,40 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 							<div class="flex flex-col items-start gap-2 border-l border-gray-300 pl-2">
 								<div class="text-sm font-bold text-black text-left mb-1">Returns</div>
 								<div class="flex items-center gap-3">
-									<div class="flex items-center gap-1.5">
-										<span class="text-xs text-gray-500 font-medium">Current:</span>
-										<span class="text-base text-primary font-extrabold">
-											<FormattedReturn value={currentReturns} />
-										</span>
-									</div>
 									{#if soldOut}
+										<!-- Sold out: Current and Fully Diluted are forward-looking returns on
+										     a purchase that cannot be made, so they are omitted rather than
+										     shown as numbers nobody can act on. Lifetime leads instead — the
+										     realised track record of the release. -->
 										<div class="flex items-center gap-1.5">
 											<span class="text-xs font-bold text-black uppercase tracking-wider">Sold Out</span>
 										</div>
+										<div class="flex items-center gap-1.5" title="Total return since this release launched, including payouts already made to earlier holders. A record of what this release has paid, not a return available today.">
+											<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
+											<span class="text-base text-primary font-extrabold">
+												<FormattedReturn value={lifetimeReturns} />
+											</span>
+										</div>
 									{:else}
+										<div class="flex items-center gap-1.5">
+											<span class="text-xs text-gray-500 font-medium">Current:</span>
+											<span class="text-base text-primary font-extrabold">
+												<FormattedReturn value={currentReturns} />
+											</span>
+										</div>
 										<div class="flex items-center gap-1.5">
 											<span class="text-xs text-gray-500 font-medium">Fully Diluted:</span>
 											<span class="text-base text-primary font-extrabold">
 												<FormattedReturn value={fullyDilutedReturns} />
 											</span>
 										</div>
+										<div class="flex items-center gap-1.5" title="Return since launch, including payouts already made to earlier holders. Informational only — not a forward-looking return.">
+											<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
+											<span class="text-base text-gray-500 font-extrabold">
+												<FormattedReturn value={lifetimeReturns} />
+											</span>
+										</div>
 									{/if}
-									<div class="flex items-center gap-1.5" title="Return since launch, including payouts already made to earlier holders. Informational only — not a forward-looking return.">
-										<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
-										<span class="text-base text-gray-500 font-extrabold">
-											<FormattedReturn value={lifetimeReturns} />
-										</span>
-									</div>
 								</div>
 								<button
 									class="text-base font-semibold text-secondary hover:text-primary transition-colors"
@@ -269,40 +283,51 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 								<div class="border-l border-gray-300 pl-2">
 									<div class="text-xs font-bold text-black mb-1 text-left">Returns</div>
 									<div class="flex flex-col gap-1 text-xs">
-										<div class="flex items-center gap-1">
-											<span class="text-gray-500">Current:</span>
-											<span class="text-primary font-extrabold">
-												<FormattedReturn value={currentReturns} />
-											</span>
-										</div>
 										{#if soldOut}
 											<div class="flex items-center gap-1">
 												<span class="font-bold text-black uppercase tracking-wider">Sold Out</span>
 											</div>
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Lifetime:</span>
+												<span class="text-primary font-extrabold">
+													<FormattedReturn value={lifetimeReturns} />
+												</span>
+											</div>
 										{:else}
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Current:</span>
+												<span class="text-primary font-extrabold">
+													<FormattedReturn value={currentReturns} />
+												</span>
+											</div>
 											<div class="flex items-center gap-1">
 												<span class="text-gray-500">Diluted:</span>
 												<span class="text-primary font-extrabold">
 													<FormattedReturn value={fullyDilutedReturns} />
 												</span>
 											</div>
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Lifetime:</span>
+												<span class="text-gray-500 font-extrabold">
+													<FormattedReturn value={lifetimeReturns} />
+												</span>
+											</div>
 										{/if}
-										<div class="flex items-center gap-1">
-											<span class="text-gray-500">Lifetime:</span>
-											<span class="text-gray-500 font-extrabold">
-												<FormattedReturn value={lifetimeReturns} />
-											</span>
-										</div>
 									</div>
 								</div>
 							</div>
 							<div class="flex flex-col gap-2">
-								<button
-									class="w-1/2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200"
-									on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
-								>
-									Buy
-								</button>
+								<!-- Guarded like its desktop counterpart. This was previously unreachable
+								     for a sold-out token only because the whole section was hidden; now
+								     that sold-out releases render, it needs its own check. -->
+								{#if !soldOut}
+									<button
+										class="w-1/2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200"
+										on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
+									>
+										Buy
+									</button>
+								{/if}
 								<button
 									class="text-sm font-semibold text-secondary hover:text-primary transition-colors text-left"
 									on:click|stopPropagation={() => openReturnsEstimator(tokenItem, mintedSupply, maxSupply)}
