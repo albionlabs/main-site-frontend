@@ -11,7 +11,8 @@
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getAddressUrl } from '$lib/utils/explorer';
-	import { calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import { calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR, calculateLifetimeIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import { isEffectivelySoldOut } from '$lib/utils/supplyThresholds';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let autoPlay = true;
@@ -25,7 +26,7 @@
 	};
 
 	let currentIndex = 0;
-	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
+	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset; soldOut: boolean }> = [];
 	let loading = true;
 	let error: string | null = null;
 	let autoPlayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,14 +54,18 @@
 			return {
 				maxSupply: formatSupplyDisplay(maxSupply),
 				mintedSupply: formatSupplyDisplay(sft.totalShares),
-				availableSupply: formatSupplyDisplay(availableSupplyBig.toString())
+				availableSupply: formatSupplyDisplay(availableSupplyBig.toString()),
+				hasSupplyData: true
 			};
 		}
 
+		// Zeroes here mean "not known yet", not "nothing left". Callers must check
+		// hasSupplyData before reading availability as a sold-out signal.
 		return {
 			maxSupply: 0,
 			mintedSupply: 0,
 			availableSupply: 0,
+			hasSupplyData: false
 		};
 	}
 
@@ -96,36 +101,31 @@
 				
 				if (assetKey) {
 					const asset = catalog.assets[assetKey];
-					// Check if token has available supply using real maxSupply data
-					const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
-					const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined;
-					let hasAvailable = false;
+					// Sold-out releases stay in the carousel. Their lifetime return is the
+					// platform's track record, and dropping them left the homepage with
+					// nothing to feature once every release had minted out. The raw
+					// `totalShares < maxSupply` test this replaces also let rounding dust
+					// through, which is how a fully minted release kept its Buy button.
+					const supplyValues = getTokenSupplyValues(token);
+					// Unknown supply is not a sold-out claim: without on-chain data the
+					// zeroed placeholders would otherwise mark every token sold out.
+					const soldOut = supplyValues.hasSupplyData
+						? isEffectivelySoldOut(supplyValues.availableSupply)
+						: false;
+					logDev(
+						`Token ${token.symbol}: minted=${supplyValues.mintedSupply}, max=${supplyValues.maxSupply}, available=${supplyValues.availableSupply}, soldOut=${soldOut}`,
+					);
 
-					if (sft && maxSupply) {
-						const totalShares = BigInt(sft.totalShares);
-						const maxSupplyBig = BigInt(maxSupply);
-						hasAvailable = totalShares < maxSupplyBig;
-						logDev(
-							`Token ${token.symbol}: totalShares=${sft.totalShares}, maxSupply=${maxSupply}, available=${maxSupplyBig - totalShares}, hasAvailable=${hasAvailable}`,
-						);
-					} else {
-						// Fallback to heuristic if no maxSupply data
-						if (sft) {
-							const totalShares = BigInt(sft.totalShares);
-							const reasonableMax = BigInt('1000000000000000000000000000'); // 1B tokens in wei
-							hasAvailable = totalShares < reasonableMax;
-						}
-						logDev(`Token ${token.symbol}: using fallback heuristic, hasAvailable=${hasAvailable}`);
-					}
-
-					if (hasAvailable) {
-						featuredTokensWithAssets.push({ token, asset });
-					}
+					featuredTokensWithAssets.push({ token, asset, soldOut });
 				} else {
 					logDev(`Token ${token.symbol} (${token.contractAddress}): no matching asset found`);
 				}
 			}
-			
+
+			// Buyable releases lead; sold-out ones follow as history rather than as the
+			// first thing a visitor sees.
+			featuredTokensWithAssets.sort((a, b) => Number(a.soldOut) - Number(b.soldOut));
+
 			if (autoPlay && featuredTokensWithAssets.length > 1) {
 				startAutoPlay();
 			}
@@ -341,7 +341,11 @@
 					{@const remainingCashflows = calculateMonthlyTokenCashflows(item.token, 65, supplyValues.mintedSupply, 1).map(m => m.cashflow)}
 					{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}
 					{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
-					{@const fullyDilutedReturns = calculateFullyDilutedReturns(item.token, 65, supplyValues.mintedSupply, supplyValues.availableSupply)}
+					{@const fullyDilutedReturns = item.soldOut ? 0 : calculateFullyDilutedReturns(item.token, 65, supplyValues.mintedSupply, supplyValues.availableSupply)}
+					<!-- Lifetime is the return since the release launched, including payouts
+					     already made to earlier holders. It is a track record, not a return
+					     available to a buyer today. -->
+					{@const lifetimeReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -359,14 +363,22 @@
 								{/if}
 								
 								<div class={tokenHeaderClasses}>
-									<div class="mb-3">
-										<h3 class={tokenNameClasses}>{item.token.releaseName}</h3>
+									<div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+										<h3 class={tokenNameClasses + ' mb-0'}>{item.token.releaseName}</h3>
+										{#if item.soldOut}
+											<span class="text-xs font-bold text-black uppercase tracking-wider border border-black px-2 py-1">
+												Sold Out
+											</span>
+										{/if}
 									</div>
+									<!-- `block` is load-bearing: the section inherits text-align:center, and
+									     text-align on an inline anchor aligns its contents, not its own box, so
+									     a short address rendered off-centre from the title above it. -->
 									<a
 										href={getAddressUrl(item.token.contractAddress, $chainId)}
 										target="_blank"
 										rel="noopener noreferrer"
-										class={tokenContractClasses + " no-underline hover:text-primary transition-colors text-left"}
+										class={tokenContractClasses + " block no-underline hover:text-primary transition-colors text-left"}
 										on:click|stopPropagation
 									>
 										{item.token.contractAddress}
@@ -385,38 +397,67 @@
 						</div>
 					</div>
 
-					<!-- Available Supply - always shown -->
-					<div class={statItemClasses}>
-						<div class={statLabelClasses}>Available Supply</div>
-						<div class={statValueClasses}>
-							<FormattedNumber
-								value={supplyValues.availableSupply}
-								type="token"
-							/>
+					{#if item.soldOut}
+						<!-- Current and Fully Diluted are forward-looking returns on a purchase
+						     that can no longer be made, so they are omitted rather than shown as
+						     numbers nobody can act on. Lifetime leads instead. -->
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Availability</div>
+							<div class={statValueClasses}>Fully Subscribed</div>
 						</div>
-					</div>
 
-					<!-- Current Returns -->
-					<div class={statItemClasses}>
-						<div class={statLabelClasses}>Current Returns</div>
-						<div class={statValueClasses + ' text-primary'}>
-							<FormattedReturn value={currentReturns} />
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Lifetime Returns</div>
+							<div class={statValueClasses + ' text-primary'}>
+								<FormattedReturn value={lifetimeReturns} />
+							</div>
 						</div>
-					</div>
+					{:else}
+						<!-- Available Supply -->
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Available Supply</div>
+							<div class={statValueClasses}>
+								<FormattedNumber
+									value={supplyValues.availableSupply}
+									type="token"
+								/>
+							</div>
+						</div>
 
-					<!-- Fully Diluted Returns -->
-					<div class={statItemClasses}>
-						<div class={statLabelClasses}>Fully Diluted Returns</div>
-						<div class={statValueClasses + ' text-primary'}>
-							<FormattedReturn value={fullyDilutedReturns} />
+						<!-- Current Returns -->
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Current Returns</div>
+							<div class={statValueClasses + ' text-primary'}>
+								<FormattedReturn value={currentReturns} />
+							</div>
 						</div>
-					</div>
+
+						<!-- Fully Diluted Returns -->
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Fully Diluted Returns</div>
+							<div class={statValueClasses + ' text-primary'}>
+								<FormattedReturn value={fullyDilutedReturns} />
+							</div>
+						</div>
+
+						<!-- Lifetime Returns - context alongside the forward-looking figures -->
+						<div class={statItemClasses}>
+							<div class={statLabelClasses}>Lifetime Returns</div>
+							<div class={statValueClasses + ' text-gray-500'}>
+								<FormattedReturn value={lifetimeReturns} />
+							</div>
+						</div>
+					{/if}
 				</div>
 
 
 			<!-- Disclaimer - full width -->
 			<div class="text-xs text-black opacity-60 font-figtree italic mb-3 text-left">
-				Returns value early principal repayments by assuming re-investment in similar assets
+				{#if item.soldOut}
+					Lifetime return is the return since this release launched, including payouts already made to earlier holders. It is a record of what this release has paid, not a return available today.
+				{:else}
+					Returns value early principal repayments by assuming re-investment in similar assets
+				{/if}
 			</div>
 
 			<!-- View returns estimator button - full width -->
@@ -428,9 +469,11 @@
 			</button>
 
 												<div class={tokenActionsClasses}>
-					<PrimaryButton on:click={() => handleBuyTokens(item.token.contractAddress)}>
-						Buy Tokens
-					</PrimaryButton>
+					{#if !item.soldOut}
+						<PrimaryButton on:click={() => handleBuyTokens(item.token.contractAddress)}>
+							Buy Tokens
+						</PrimaryButton>
+					{/if}
 					<SecondaryButton href="/assets/{getEnergyFieldId(item.token.contractAddress)}" >
 						View Asset
 					</SecondaryButton>
