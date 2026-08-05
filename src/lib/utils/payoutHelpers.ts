@@ -75,36 +75,55 @@ export const MINT_PRICE_USD = 1;
  */
 export type PayoutHistoryEntry = {
   month?: string;
-  tokenPayout?: { payoutPerToken?: number };
+  tokenPayout?: { totalPayout?: number };
 };
 
 /**
  * Cumulative payout per token to date, as a multiple of the $1 mint price.
  *
- * Strictly backward-looking: it sums only months that have actually paid out,
+ * Strictly backward-looking: it counts only months that have actually paid out,
  * unlike lifetime IRR, which spans the whole field life and is mostly forecast.
- * 1.5 means holders have been paid back one and a half times what they put in.
+ * 1.5 means a token has been paid back one and a half times its mint price.
  *
- * Returns null when payout history is unavailable — a release that has not paid
- * yet is a real 0x, but a token whose metadata never loaded is not, and the two
- * must not render the same.
+ * Every month is divided by the CURRENT supply, deliberately — the figure is
+ * "what one of today's tokens would have earned had the release been fully
+ * subscribed throughout". It is not what an early holder actually received on a
+ * release that was still minting: those months were shared between fewer tokens,
+ * so each paid more. Summing the per-month `payoutPerToken` values instead would
+ * give that early-holder figure (see resolvePayoutPerToken, which preserves
+ * legacy pinned values for exactly that reason), but it makes the headline
+ * number depend on when a holder bought, which is not comparable across
+ * releases. For a release that was fully minted before its first payout the two
+ * definitions agree exactly.
+ *
+ * Note this makes the ratio drift down as a partially-sold release mints more.
+ *
+ * Returns null when payout history or supply is unavailable — a release that has
+ * not paid yet is a real 0x, but a token whose metadata never loaded is not, and
+ * the two must not render the same.
  */
 export function sumPayoutRatioToDate(
   payoutData: readonly PayoutHistoryEntry[] | undefined | null,
+  mintedSupply: bigint | string | number | undefined | null,
 ): number | null {
   if (!Array.isArray(payoutData)) {
     return null;
   }
 
-  let total = 0;
+  const supply = toTokenCount(mintedSupply);
+  if (!Number.isFinite(supply) || supply <= 0) {
+    return null;
+  }
+
+  let totalPaid = 0;
   for (const entry of payoutData) {
-    const perToken = entry?.tokenPayout?.payoutPerToken;
-    if (typeof perToken === "number" && Number.isFinite(perToken)) {
-      total += perToken;
+    const monthTotal = entry?.tokenPayout?.totalPayout;
+    if (typeof monthTotal === "number" && Number.isFinite(monthTotal)) {
+      totalPaid += monthTotal;
     }
   }
 
-  return total / MINT_PRICE_USD;
+  return totalPaid / supply / MINT_PRICE_USD;
 }
 
 /**

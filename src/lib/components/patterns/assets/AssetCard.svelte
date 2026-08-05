@@ -218,7 +218,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 				     and not what a buyer today would earn. Paid-to-date is its counterpart —
 				     purely historical, distributions that have actually happened. -->
 				{@const lifetimeReturns = calculateLifetimeIRR(tokenItem, 65, mintedSupply, 1)}
-				{@const payoutRatio = sumPayoutRatioToDate(tokenItem.payoutData)}
+				{@const payoutRatio = sumPayoutRatioToDate(tokenItem.payoutData, mintedSupply)}
 				{@const fullyDilutedReturns = soldOut ? 0 : calculateFullyDilutedReturns(tokenItem, 65, mintedSupply, availableSupply)}
 					<div class={tokenButtonClasses}>
 						<!-- Desktop: Full token info -->
@@ -252,7 +252,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												<FormattedReturn value={lifetimeReturns} />
 											</span>
 										</div>
-										<div class="flex items-center gap-1.5" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+										<div class="flex items-center gap-1.5" title="Total distributions to date divided by the full token supply, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
 											<span class="text-xs text-gray-500 font-medium">Paid out so far:</span>
 											<span class="text-base text-primary font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 										</div>
@@ -275,7 +275,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												<FormattedReturn value={lifetimeReturns} />
 											</span>
 										</div>
-										<div class="flex items-center gap-1.5" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+										<div class="flex items-center gap-1.5" title="Total distributions to date divided by the full token supply, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
 											<span class="text-xs text-gray-500 font-medium">Paid out so far:</span>
 											<span class="text-base text-gray-500 font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 										</div>

@@ -353,7 +353,7 @@
 					     forecast to the end of field life — so it is mostly projection. Paid to
 					     date is purely historical: distributions that have actually happened. -->
 					{@const lifetimeReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
-					{@const payoutRatio = sumPayoutRatioToDate(item.token.payoutData)}
+					{@const payoutRatio = sumPayoutRatioToDate(item.token.payoutData, supplyValues.mintedSupply)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -421,7 +421,7 @@
 							</div>
 						</div>
 
-						<div class={statItemClasses} title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+						<div class={statItemClasses} title="Total distributions to date divided by the full token supply, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
 							<div class={statLabelClasses}>Paid Out So Far</div>
 							<div class={statValueClasses + ' text-primary'}>{formatPayoutRatio(payoutRatio)}</div>
 						</div>
@@ -462,7 +462,7 @@
 							</div>
 						</div>
 
-						<div class={statItemClasses} title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+						<div class={statItemClasses} title="Total distributions to date divided by the full token supply, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
 							<div class={statLabelClasses}>Paid Out So Far</div>
 							<div class={statValueClasses + ' text-gray-500'}>{formatPayoutRatio(payoutRatio)}</div>
 						</div>
@@ -473,7 +473,7 @@
 			<!-- Disclaimer - full width -->
 			<div class="text-xs text-black opacity-60 font-figtree italic mb-3 text-left">
 				{#if item.soldOut}
-					Expected lifetime return runs from launch to the end of field life, combining payouts already made with those still forecast, so it is not a return available to a buyer today. Paid out so far counts only distributions already made.
+					Expected lifetime return runs from launch to the end of field life, combining payouts already made with those still forecast, so it is not a return available to a buyer today. Paid out so far counts only distributions already made, valued across the full token supply.
 				{:else}
 					Returns value early principal repayments by assuming re-investment in similar assets
 				{/if}

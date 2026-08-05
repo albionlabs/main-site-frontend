@@ -107,37 +107,74 @@ describe("resolvePayoutPerToken", () => {
 });
 
 describe("sumPayoutRatioToDate", () => {
-  const payout = (payoutPerToken: number) => ({
+  const month = (totalPayout: number) => ({
     month: "2025-05",
-    tokenPayout: { payoutPerToken },
+    tokenPayout: { totalPayout },
   });
 
-  it("sums per-token payouts into a multiple of the $1 mint price", () => {
-    expect(sumPayoutRatioToDate([payout(0.25), payout(0.5), payout(0.75)])).toBe(
-      1.5,
+  // Real production data: ALB-WR1-R1's 12 distributions, which total $9,240.62
+  // against a supply fixed at 12,000 since before its first payout. Because the
+  // supply never moved, this is the one case where "divide by current supply"
+  // and "what an early holder actually received" cannot disagree — so it pins
+  // the arithmetic without baking in the choice between them.
+  const R1_DISTRIBUTIONS_TOTAL = 9240.62;
+
+  it("divides total distributions by supply to give a multiple of the mint price", () => {
+    expect(
+      sumPayoutRatioToDate([month(R1_DISTRIBUTIONS_TOTAL)], R1_SUPPLY_WEI),
+    ).toBeCloseTo(0.7700516, 6);
+  });
+
+  it("sums across months before dividing", () => {
+    const split = [month(4000.62), month(3000), month(2240)];
+    expect(sumPayoutRatioToDate(split, R1_SUPPLY_WEI)).toBeCloseTo(0.7700516, 6);
+  });
+
+  it("accepts a plain token count as readily as wei", () => {
+    expect(sumPayoutRatioToDate([month(24555.02)], 36000)).toBeCloseTo(
+      0.6820839,
+      6,
+    );
+  });
+
+  it("values every month at current supply, not supply at the time", () => {
+    // ALB-WR1-R2 paid $24,555.02 over 8 months, some while only ~21,617 of its
+    // 36,000 were minted. Early holders received more per token than this, and
+    // that is intended: the figure answers "fully subscribed throughout".
+    expect(sumPayoutRatioToDate([month(24555.02)], 36000)).toBeLessThan(
+      24555.02 / 21617,
     );
   });
 
   it("reports 0x for a release that has not paid out yet", () => {
-    expect(sumPayoutRatioToDate([])).toBe(0);
+    expect(sumPayoutRatioToDate([], R1_SUPPLY_WEI)).toBe(0);
   });
 
   it("distinguishes no payouts from no payout data", () => {
     // An empty history is a real 0x; a missing history is unknown. Rendering
     // both as 0x would assert a track record the app cannot actually see.
-    expect(sumPayoutRatioToDate([])).toBe(0);
-    expect(sumPayoutRatioToDate(undefined)).toBeNull();
-    expect(sumPayoutRatioToDate(null)).toBeNull();
+    expect(sumPayoutRatioToDate([], R1_SUPPLY_WEI)).toBe(0);
+    expect(sumPayoutRatioToDate(undefined, R1_SUPPLY_WEI)).toBeNull();
+    expect(sumPayoutRatioToDate(null, R1_SUPPLY_WEI)).toBeNull();
+  });
+
+  it("returns null rather than dividing by an unknown supply", () => {
+    expect(sumPayoutRatioToDate([month(9240.62)], undefined)).toBeNull();
+    expect(sumPayoutRatioToDate([month(9240.62)], 0)).toBeNull();
+    expect(sumPayoutRatioToDate([month(9240.62)], "not-a-number")).toBeNull();
   });
 
   it("skips malformed entries instead of poisoning the total with NaN", () => {
     expect(
-      sumPayoutRatioToDate([
-        payout(0.4),
-        { month: "2025-06", tokenPayout: { payoutPerToken: Number.NaN } },
-        { month: "2025-07" },
-        payout(0.6),
-      ]),
+      sumPayoutRatioToDate(
+        [
+          month(6000),
+          { month: "2025-06", tokenPayout: { totalPayout: Number.NaN } },
+          { month: "2025-07" },
+          month(6000),
+        ],
+        12000,
+      ),
     ).toBeCloseTo(1, 10);
   });
 });

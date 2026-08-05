@@ -1470,7 +1470,7 @@ async function handlePurchaseSuccess() {
 										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 										{@const soldOut = isEffectivelySoldOut(supply?.availableSupply)}
 										{@const fullyDilutedRemainingIRR = soldOut ? 0 : calculateFullyDilutedReturns(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
-										{@const payoutRatio = sumPayoutRatioToDate(token.payoutData)}
+										{@const payoutRatio = sumPayoutRatioToDate(token.payoutData, supply?.mintedSupply ?? 0)}
 
 										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
 											Returns @${defaultOilPrice} {crudeBenchmark} Oil Price
@@ -1528,7 +1528,7 @@ async function handlePurchaseSuccess() {
 											</div>
 											<!-- The backward-looking counterpart to lifetime IRR: distributions that
 											     have actually been made, as a multiple of the $1 mint price. -->
-											<div class="text-center p-3 bg-white" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+											<div class="text-center p-3 bg-white" title="Total distributions to date divided by the full token supply, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
 												<span class="text-xs font-medium text-black opacity-70 block mb-1">Paid Out So Far</span>
 												<span class="text-xl font-extrabold text-primary">{payoutRatio === null ? '—' : `${payoutRatio.toFixed(2)}x`}</span>
 											</div>
