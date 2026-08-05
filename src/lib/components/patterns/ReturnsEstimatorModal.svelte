@@ -526,7 +526,7 @@
 							{/if}
 						</div>
 
-						{#each [{title: 'Remaining (From Today)', metrics: remainingMetrics, suffix: 'remaining'}, {title: 'Lifetime (From Start)', metrics: lifetimeMetrics, suffix: 'lifetime'}] as section (section.suffix)}
+						{#each [{title: 'Remaining (From Today)', metrics: remainingMetrics, suffix: 'remaining'}, {title: 'Expected Over Lifetime', metrics: lifetimeMetrics, suffix: 'lifetime'}] as section (section.suffix)}
 							<div class={section.suffix === 'remaining' ? 'mb-6' : ''}>
 								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3 text-left">{section.title}</h4>
 								<div class={metricGridClasses}>
