@@ -13,6 +13,7 @@
 	import { getAddressUrl } from '$lib/utils/explorer';
 	import { calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR, calculateLifetimeIRR } from '$lib/utils/returnsEstimatorHelpers';
 	import { isEffectivelySoldOut } from '$lib/utils/supplyThresholds';
+	import { sumPayoutRatioToDate } from '$lib/utils/payoutHelpers';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let autoPlay = true;
@@ -262,6 +263,11 @@
 	const nextButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target right-[-4rem] items-center justify-center rounded-full';
 
 	
+	/** Cumulative distributions per token as a multiple of the $1 mint price, e.g. "1.52x". */
+	function formatPayoutRatio(ratio: number | null): string {
+		return ratio === null ? '—' : `${ratio.toFixed(2)}x`;
+	}
+
 	// Get status-specific classes
 	function getStatusIndicatorClasses(status: string) {
 		switch (status) {
@@ -342,10 +348,12 @@
 					{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}
 					{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 					{@const fullyDilutedReturns = item.soldOut ? 0 : calculateFullyDilutedReturns(item.token, 65, supplyValues.mintedSupply, supplyValues.availableSupply)}
-					<!-- Lifetime is the return since the release launched, including payouts
-					     already made to earlier holders. It is a track record, not a return
-					     available to a buyer today. -->
+					<!-- Two different things, deliberately shown side by side. Lifetime IRR spans
+					     the release's whole life — payouts already made plus the payouts still
+					     forecast to the end of field life — so it is mostly projection. Paid to
+					     date is purely historical: distributions that have actually happened. -->
 					{@const lifetimeReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
+					{@const payoutRatio = sumPayoutRatioToDate(item.token.payoutData)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -406,11 +414,16 @@
 							<div class={statValueClasses}>Fully Subscribed</div>
 						</div>
 
-						<div class={statItemClasses}>
-							<div class={statLabelClasses}>Lifetime Returns</div>
+						<div class={statItemClasses} title="Annualised IRR across the release's full life — payouts already made plus the payouts still forecast, at the $65/bbl base case.">
+							<div class={statLabelClasses}>Expected Lifetime Return</div>
 							<div class={statValueClasses + ' text-primary'}>
 								<FormattedReturn value={lifetimeReturns} />
 							</div>
+						</div>
+
+						<div class={statItemClasses} title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+							<div class={statLabelClasses}>Paid Out So Far</div>
+							<div class={statValueClasses + ' text-primary'}>{formatPayoutRatio(payoutRatio)}</div>
 						</div>
 					{:else}
 						<!-- Available Supply -->
@@ -440,12 +453,18 @@
 							</div>
 						</div>
 
-						<!-- Lifetime Returns - context alongside the forward-looking figures -->
-						<div class={statItemClasses}>
-							<div class={statLabelClasses}>Lifetime Returns</div>
+						<!-- History alongside the forward-looking figures, in grey so the two
+						     returns a buyer can act on stay the emphasis. -->
+						<div class={statItemClasses} title="Annualised IRR across the release's full life — payouts already made plus the payouts still forecast, at the $65/bbl base case.">
+							<div class={statLabelClasses}>Expected Lifetime Return</div>
 							<div class={statValueClasses + ' text-gray-500'}>
 								<FormattedReturn value={lifetimeReturns} />
 							</div>
+						</div>
+
+						<div class={statItemClasses} title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+							<div class={statLabelClasses}>Paid Out So Far</div>
+							<div class={statValueClasses + ' text-gray-500'}>{formatPayoutRatio(payoutRatio)}</div>
 						</div>
 					{/if}
 				</div>
@@ -454,7 +473,7 @@
 			<!-- Disclaimer - full width -->
 			<div class="text-xs text-black opacity-60 font-figtree italic mb-3 text-left">
 				{#if item.soldOut}
-					Lifetime return is the return since this release launched, including payouts already made to earlier holders. It is a record of what this release has paid, not a return available today.
+					Expected lifetime return runs from launch to the end of field life, combining payouts already made with those still forecast, so it is not a return available to a buyer today. Paid out so far counts only distributions already made.
 				{:else}
 					Returns value early principal repayments by assuming re-investment in similar assets
 				{/if}

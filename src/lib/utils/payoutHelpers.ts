@@ -63,6 +63,50 @@ export function resolvePayoutPerToken(
   return derivePayoutPerToken(totalPayout, mintedSupply);
 }
 
+/** Tokens mint at $1, so USD paid per token doubles as a multiple of principal. */
+export const MINT_PRICE_USD = 1;
+
+/**
+ * A month of payout history, loosened from `PayoutData`.
+ *
+ * Every field is optional because this reads pinned metadata, where a month can
+ * arrive without a `tokenPayout` block at all. Naming the shape keeps the
+ * defensive reads below honest about what is actually guaranteed.
+ */
+export type PayoutHistoryEntry = {
+  month?: string;
+  tokenPayout?: { payoutPerToken?: number };
+};
+
+/**
+ * Cumulative payout per token to date, as a multiple of the $1 mint price.
+ *
+ * Strictly backward-looking: it sums only months that have actually paid out,
+ * unlike lifetime IRR, which spans the whole field life and is mostly forecast.
+ * 1.5 means holders have been paid back one and a half times what they put in.
+ *
+ * Returns null when payout history is unavailable — a release that has not paid
+ * yet is a real 0x, but a token whose metadata never loaded is not, and the two
+ * must not render the same.
+ */
+export function sumPayoutRatioToDate(
+  payoutData: readonly PayoutHistoryEntry[] | undefined | null,
+): number | null {
+  if (!Array.isArray(payoutData)) {
+    return null;
+  }
+
+  let total = 0;
+  for (const entry of payoutData) {
+    const perToken = entry?.tokenPayout?.payoutPerToken;
+    if (typeof perToken === "number" && Number.isFinite(perToken)) {
+      total += perToken;
+    }
+  }
+
+  return total / MINT_PRICE_USD;
+}
+
 /**
  * Normalise a supply value to a whole-token count.
  *

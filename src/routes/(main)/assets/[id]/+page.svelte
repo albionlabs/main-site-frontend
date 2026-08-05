@@ -20,6 +20,7 @@
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
 import { calculateLifetimeIRR, calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
+import { sumPayoutRatioToDate } from '$lib/utils/payoutHelpers';
 import { PINATA_GATEWAY, ORDERBOOK_SOURCES } from '$lib/network';
 import { catalogService } from '$lib/services/CatalogService';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
@@ -1469,11 +1470,12 @@ async function handlePurchaseSuccess() {
 										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 										{@const soldOut = isEffectivelySoldOut(supply?.availableSupply)}
 										{@const fullyDilutedRemainingIRR = soldOut ? 0 : calculateFullyDilutedReturns(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
+										{@const payoutRatio = sumPayoutRatioToDate(token.payoutData)}
 
 										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
 											Returns @${defaultOilPrice} {crudeBenchmark} Oil Price
 										</h5>
-										<div class="grid grid-cols-3 gap-2 sm:gap-3 mb-3 overflow-visible">
+										<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 overflow-visible">
 											<div class="text-center p-3 bg-white">
 												<span class="text-xs font-medium text-black opacity-70 block mb-1">Current</span>
 												{#if soldOut}
@@ -1496,9 +1498,15 @@ async function handlePurchaseSuccess() {
 													<span class="text-xl font-extrabold text-primary">{formatSmartReturn(fullyDilutedRemainingIRR)}</span>
 												{/if}
 											</div>
-											<div class="text-center p-3 bg-white border-l border-light-gray relative overflow-visible" style="border-left-width: 1.5px;">
+											<!-- Separates the forward-looking figures from the historical ones. That
+											     split runs left-to-right at sm+, but the grid stacks 2x2 on mobile where
+											     the same rule lands mid-row and reads as a stray mark, so it is sm-only.
+											     The width now comes from the class: an inline border-left-width paired
+											     with a responsive border class would still paint, since the Tailwind
+											     preflight sets border-style: solid on every element. -->
+											<div class="text-center p-3 bg-white sm:border-l sm:border-light-gray relative overflow-visible">
 												<div class="flex items-center justify-center gap-1 mb-1">
-													<span class="text-xs font-medium text-black opacity-70">Lifetime</span>
+													<span class="text-xs font-medium text-black opacity-70">Expected Lifetime</span>
 													<span
 														class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
 														on:mouseenter={() => showTooltipWithDelay('lifetime-tooltip-' + token.contractAddress)}
@@ -1511,12 +1519,18 @@ async function handlePurchaseSuccess() {
 														?
 													</span>
 													{#if showTooltip === 'lifetime-tooltip-' + token.contractAddress}
-														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded-none text-xs whitespace-nowrap z-[1000] mb-[5px]">
-															Return since launch, including payouts already made to earlier holders. Informational only, not a forward-looking return.
+														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded-none text-xs w-56 text-left z-[1000] mb-[5px]">
+															Annualised IRR across the release's full life &mdash; payouts already made plus those still forecast, at the ${defaultOilPrice}/bbl base case. Not a return available to a buyer today.
 														</div>
 													{/if}
 												</div>
 												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(lifetimeIRR)}</span>
+											</div>
+											<!-- The backward-looking counterpart to lifetime IRR: distributions that
+											     have actually been made, as a multiple of the $1 mint price. -->
+											<div class="text-center p-3 bg-white" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+												<span class="text-xs font-medium text-black opacity-70 block mb-1">Paid Out So Far</span>
+												<span class="text-xl font-extrabold text-primary">{payoutRatio === null ? '—' : `${payoutRatio.toFixed(2)}x`}</span>
 											</div>
 										</div>
 										<p class="text-xs text-gray-600 mb-2 italic">

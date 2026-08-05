@@ -11,6 +11,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR, calculateFullyDilutedReturns } from '$lib/utils/returnsEstimatorHelpers';
+	import { sumPayoutRatioToDate } from '$lib/utils/payoutHelpers';
 	import { formatSupplyDisplay, isEffectivelySoldOut } from '$lib/utils/supplyHelpers';
 	import { sumRemainingProduction } from '$lib/utils/productionHelpers';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
@@ -94,6 +95,11 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 		showReturnsEstimator = true;
 	}
 	
+	/** Cumulative distributions per token as a multiple of the $1 mint price, e.g. "1.52x". */
+	function formatPayoutRatio(ratio: number | null): string {
+		return ratio === null ? '—' : `${ratio.toFixed(2)}x`;
+	}
+
 	// Tailwind class mappings used in markup
 	const assetDescriptionClasses = 'text-gray-700 text-sm leading-relaxed m-0 mb-4 line-clamp-2 font-figtree lg:line-clamp-3 lg:text-base lg:mb-6';
 	const highlightedStatsClasses = 'grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 my-3 lg:my-4 p-3 lg:p-4 bg-white rounded-none';
@@ -207,9 +213,12 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 				{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 				{@const availableSupply = maxSupply - mintedSupply}
 				{@const soldOut = isEffectivelySoldOut(availableSupply)}
-				<!-- Lifetime is informational only: it includes months already paid out to
-				     earlier holders, so it is not what a buyer today would earn. -->
+				<!-- Lifetime IRR spans the release's whole life: payouts already made plus
+				     the payouts still forecast to the end of field life. Mostly projection,
+				     and not what a buyer today would earn. Paid-to-date is its counterpart —
+				     purely historical, distributions that have actually happened. -->
 				{@const lifetimeReturns = calculateLifetimeIRR(tokenItem, 65, mintedSupply, 1)}
+				{@const payoutRatio = sumPayoutRatioToDate(tokenItem.payoutData)}
 				{@const fullyDilutedReturns = soldOut ? 0 : calculateFullyDilutedReturns(tokenItem, 65, mintedSupply, availableSupply)}
 					<div class={tokenButtonClasses}>
 						<!-- Desktop: Full token info -->
@@ -228,20 +237,24 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 							</div>
 							<div class="flex flex-col items-start gap-2 border-l border-gray-300 pl-2">
 								<div class="text-sm font-bold text-black text-left mb-1">Returns</div>
-								<div class="flex items-center gap-3">
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
 									{#if soldOut}
 										<!-- Sold out: Current and Fully Diluted are forward-looking returns on
 										     a purchase that cannot be made, so they are omitted rather than
-										     shown as numbers nobody can act on. Lifetime leads instead — the
-										     realised track record of the release. -->
+										     shown as numbers nobody can act on. The release's whole-life return
+										     and its actual payouts to date lead instead. -->
 										<div class="flex items-center gap-1.5">
 											<span class="text-xs font-bold text-black uppercase tracking-wider">Sold Out</span>
 										</div>
-										<div class="flex items-center gap-1.5" title="Total return since this release launched, including payouts already made to earlier holders. A record of what this release has paid, not a return available today.">
-											<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
+										<div class="flex items-center gap-1.5" title="Annualised IRR across the release's full life — payouts already made plus the payouts still forecast, at the $65/bbl base case. Not a return available to a buyer today.">
+											<span class="text-xs text-gray-500 font-medium">Expected Lifetime:</span>
 											<span class="text-base text-primary font-extrabold">
 												<FormattedReturn value={lifetimeReturns} />
 											</span>
+										</div>
+										<div class="flex items-center gap-1.5" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+											<span class="text-xs text-gray-500 font-medium">Paid out so far:</span>
+											<span class="text-base text-primary font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 										</div>
 									{:else}
 										<div class="flex items-center gap-1.5">
@@ -256,11 +269,15 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												<FormattedReturn value={fullyDilutedReturns} />
 											</span>
 										</div>
-										<div class="flex items-center gap-1.5" title="Return since launch, including payouts already made to earlier holders. Informational only — not a forward-looking return.">
-											<span class="text-xs text-gray-500 font-medium">Lifetime:</span>
+										<div class="flex items-center gap-1.5" title="Annualised IRR across the release's full life — payouts already made plus the payouts still forecast, at the $65/bbl base case. Not a return available to a buyer today.">
+											<span class="text-xs text-gray-500 font-medium">Expected Lifetime:</span>
 											<span class="text-base text-gray-500 font-extrabold">
 												<FormattedReturn value={lifetimeReturns} />
 											</span>
+										</div>
+										<div class="flex items-center gap-1.5" title="Distributions per token since launch, as a multiple of the $1 mint price. Payouts actually made — no forecast.">
+											<span class="text-xs text-gray-500 font-medium">Paid out so far:</span>
+											<span class="text-base text-gray-500 font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 										</div>
 									{/if}
 								</div>
@@ -288,10 +305,14 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												<span class="font-bold text-black uppercase tracking-wider">Sold Out</span>
 											</div>
 											<div class="flex items-center gap-1">
-												<span class="text-gray-500">Lifetime:</span>
+												<span class="text-gray-500">Expected lifetime:</span>
 												<span class="text-primary font-extrabold">
 													<FormattedReturn value={lifetimeReturns} />
 												</span>
+											</div>
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Paid so far:</span>
+												<span class="text-primary font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 											</div>
 										{:else}
 											<div class="flex items-center gap-1">
@@ -307,10 +328,14 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 												</span>
 											</div>
 											<div class="flex items-center gap-1">
-												<span class="text-gray-500">Lifetime:</span>
+												<span class="text-gray-500">Expected lifetime:</span>
 												<span class="text-gray-500 font-extrabold">
 													<FormattedReturn value={lifetimeReturns} />
 												</span>
+											</div>
+											<div class="flex items-center gap-1">
+												<span class="text-gray-500">Paid so far:</span>
+												<span class="text-gray-500 font-extrabold">{formatPayoutRatio(payoutRatio)}</span>
 											</div>
 										{/if}
 									</div>

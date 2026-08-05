@@ -3,6 +3,7 @@ import {
   derivePayoutPerToken,
   resolvePayoutPerToken,
   toTokenCount,
+  sumPayoutRatioToDate,
 } from "./payoutHelpers";
 
 // ALB-WR1-R1 is fully minted at exactly 12,000 tokens, so the historical
@@ -102,5 +103,41 @@ describe("resolvePayoutPerToken", () => {
     expect(
       resolvePayoutPerToken(Number.NaN, 3018.679, R2_SUPPLY_NOW_WEI),
     ).toBeCloseTo(0.08385219, 8);
+  });
+});
+
+describe("sumPayoutRatioToDate", () => {
+  const payout = (payoutPerToken: number) => ({
+    month: "2025-05",
+    tokenPayout: { payoutPerToken },
+  });
+
+  it("sums per-token payouts into a multiple of the $1 mint price", () => {
+    expect(sumPayoutRatioToDate([payout(0.25), payout(0.5), payout(0.75)])).toBe(
+      1.5,
+    );
+  });
+
+  it("reports 0x for a release that has not paid out yet", () => {
+    expect(sumPayoutRatioToDate([])).toBe(0);
+  });
+
+  it("distinguishes no payouts from no payout data", () => {
+    // An empty history is a real 0x; a missing history is unknown. Rendering
+    // both as 0x would assert a track record the app cannot actually see.
+    expect(sumPayoutRatioToDate([])).toBe(0);
+    expect(sumPayoutRatioToDate(undefined)).toBeNull();
+    expect(sumPayoutRatioToDate(null)).toBeNull();
+  });
+
+  it("skips malformed entries instead of poisoning the total with NaN", () => {
+    expect(
+      sumPayoutRatioToDate([
+        payout(0.4),
+        { month: "2025-06", tokenPayout: { payoutPerToken: Number.NaN } },
+        { month: "2025-07" },
+        payout(0.6),
+      ]),
+    ).toBeCloseTo(1, 10);
   });
 });
