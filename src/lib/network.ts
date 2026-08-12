@@ -11,7 +11,7 @@ export const BASE_ORDERBOOK_SUBGRAPH_URL =
 // subgraph-free from orderBytes + deployBlock in network.ts; this endpoint is
 // still used by the Context/trades scan, not for order resolution.
 export const BASE_ORDERBOOK_V6_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/raindex-base/0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE-a99d05e/gn";
+  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/raindex-base/0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE-105c526/gn";
 export const BASE_METADATA_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn";
 
